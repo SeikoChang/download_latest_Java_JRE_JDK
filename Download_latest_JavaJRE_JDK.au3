@@ -18,6 +18,7 @@ Global $__sDebugTimeOut = 0 ; Set Debug TimeOut, zero equel to infinity, 0 by de
 Dim Const $t1 = TimerInit()
 Dim Const $sJavaDownloadPage = "https://www.oracle.com/java/technologies/javase-downloads.html"
 Dim Const $sJavaCookie = "oraclelicense=accept-securebackup-cookie"
+Dim Const $sJavaURL = "https://www.oracle.com"
 
 DownloadLatestJAVA()
 
@@ -27,7 +28,7 @@ Func DownloadLatestJAVA($bDownload = Default, $sFolder = Default, $bReplace = De
     If $__bDebug == True Then _ArrayDisplay($aJavaDownloadURI, "$aJavaDownloadURI", $__sDebugTimeOut)
 
     For $i = 0 To UBound($aJavaDownloadURI) -1
-        Global $sJavaMain = "https://www.oracle.com" & $aJavaDownloadURI[$i]
+        Global $sJavaMain = $sJavaURL & $aJavaDownloadURI[$i]
         ConsoleWrite("$sJavaMain = " & $sJavaMain & @CRLF)
         Global $aURI = _DownloadLatestJAVA($bDownload, $sFolder, $bReplace, $bProgress, $sFunc) ; by default, it only get a array of all download links. You will donwload all JAVA by UDF in this script if you assign True for first parameter
         If $__bDebug == True Then _ArrayDisplay($aURI, "$aURI", $__sDebugTimeOut)
@@ -49,12 +50,14 @@ EndFunc
 
 Func WinHttpDownloadWithCookie($sRefURI, $sCookie, $sURI, $sFilePath)
     Local $oHTTP = ObjCreate("WinHttp.WinHttpRequest.5.1")
+
     ; get cookie
     $oHTTP.Open("GET", $sRefURI)
     $oHTTP.Send()
     Local $rh = $oHTTP.GetAllResponseHeaders()
     Local $cookie = $sCookie
     If $__bDebug == True Then msgbox(0,"", $cookie, $__sDebugTimeOut)
+
     ; then download
     $oHTTP.Open("GET", $sURI)
     $oHTTP.setRequestHeader("Cookie", $cookie)
@@ -114,7 +117,7 @@ Func WinHttpDownload($sSource, $sFilePath, $bReplace = False, $bProgress = False
 #ce
 
     ; Initialize
-    Local $iErr
+    Local $iErr = 0
     Local $hOpen = _WinHttpOpen()
 
     If @error Then
@@ -257,7 +260,8 @@ EndFunc
 
 Func InetGetDownload($sSource, $sFilePath, $bReplace = False, $bProgress = False)
     ; Skip file download if file already exists
-    If InetFileSizeCompare($sSource, $sFilePath) And ($bReplace == False) Then Return True
+    Local $iErr = 0
+    If InetFileSizeCompare($sSource, $sFilePath) And ($bReplace == False) Then Return SetError($iErr, 0, $sFilePath)
 
     ; Download the file in the background with the selected option of 'force a reload from the remote site.'
     Local $hDownload = InetGet($sSource, $sFilePath, $INET_FORCERELOAD + $INET_IGNORESSL + $INET_BINARYTRANSFER, $INET_DOWNLOADBACKGROUND)
@@ -297,26 +301,33 @@ Func InetGetDownload($sSource, $sFilePath, $bReplace = False, $bProgress = False
 
     ; Retrieve details about the download file.
     Local $aData = InetGetInfo($hDownload)
+    $iErr = @error
     If @error Then
         ConsoleWrite("InetGetInfo @Error = " & @error)
-        InetClose($hDownload)
+;~         InetClose($hDownload)
 ;~         FileDelete($sFilePath)
-        Return False ; If an error occurred then return from the function and delete the file.
+;~         Return SetError($iErr, 0, $sFilePath) ; If an error occurred then return from the function and delete the file.
     EndIf
 
     ; Close the handle returned by InetGet.
     InetClose($hDownload)
     SplashOff()
+
+    ; Return whatever the result
+    ConsoleWrite("Final Err : " & $iErr & @CRLF)
+    Return SetError($iErr, 0, $sFilePath)
 EndFunc
 
 
 Func _DownloadLatestJAVA($bDownload = Default, $sFolder = Default, $bReplace = Default, $bProgress = Default, $sFunc = Default)
+    Local $sMatchString = "data-file='//(download.oracle.com)/(otn(-pub)?/java/jdk)/(.*)/([A-Za-z0-9]{32})/(server-)?((jre|jdk)-.*\.(rpm|exe|dmg))' data-license=.*"
+    Local $sMajorVersion = "1.8.0"
     If ($bDownload == Default Or $bDownload == -1) Then $bDownload = True
     If ($sFolder == Default Or $sFolder == -1) Then $sFolder = @ScriptDir
     If ($bReplace == Default Or $bReplace == -1) Then $bReplace = False
     If ($bProgress == Default Or $bProgress == -1) Then $bProgress = False
     If ($sFunc == Default Or $sFunc == -1) Then
-        $sFunc = InetGetDownload
+        $sFunc = WinHttpDownload
     Else
         If (IsFunc($sFunc) == 0) Then Return SetError(1, 0, 0)
     EndIf
@@ -341,48 +352,72 @@ Func _DownloadLatestJAVA($bDownload = Default, $sFolder = Default, $bReplace = D
 
     ; loop through each line of the file
     Local $sLineRead, $aArray, $sProcessURL, $sFile, $sURI
+    Local $sDomain, $sVersion, $sSecretPath, $sFilename, $aArray2
+    Local $sPlatform, $sMinorVersion
     While 1
-       ; read each line from a file
-       $sLineRead = FileReadLine($hFileOpen)
-       ; exit the loop if end of file
-       If @error Then ExitLoop
-       ; show the line read (just for testing)
-       If $__bDebug == True Then ConsoleWrite($sLineRead & @CRLF)
-       If StringRegExp($sLineRead, "data-file='//(download.oracle.com)/(otn(-pub)?/java/jdk)/(.*)/([A-Za-z0-9]{32})/((jre|jdk)-.*\.(rpm|exe|dmg))' data-license=.*") Then
-           If $__bDebug == True Then ConsoleWrite($sLineRead & @CRLF)
-           $aArray = StringRegExp($sLineRead, "data-file='//(download.oracle.com)/(otn(-pub)?/java/jdk)/(.*)/([A-Za-z0-9]{32})/((jre|jdk)-.*\.(rpm|exe|dmg))' data-license=.*", 3)
-           If $__bDebug == True Then _ArrayDisplay($aArray, "$aArray",  $__sDebugTimeOut)
-           For $i = 0 To UBound($aArray) - 1
-               If $__bDebug == True Then ConsoleWrite("RegExp Test with Option 3 - " & $aArray[$i] & @CRLF)
-           Next
-           $sProcessURL = "https://" & $aArray[0] & "/" & "otn-pub/java/jdk" & "/" & $aArray[3] & "/" & $aArray[4] & "/" & $aArray[5]
-           ConsoleWrite("$sProcessURL = " & $sProcessURL & @CRLF)
-           $sFile = $sFolder & "\" & $aArray[5]
-           ConsoleWrite("$sFile = " & $sFile & @CRLF)
-           Local $sJAVAHTML = $sFile & ".html"
-           ConsoleWrite("$sJAVAHTML = " & $sJAVAHTML & @CRLF)
-           WinHttpDownloadWithCookie($sJavaMain, $sJavaCookie, $sProcessURL, $sJAVAHTML)
-           $sURI = StringReplace(GetAllHREFfromHTML($sJAVAHTML), "&#43;", "+")
-           ConsoleWrite("$sURI = " & $sURI & @CRLF)
-           Local $aTmp[1][2]
-           $aTmp[0][0] = $sURI
-           $aTmp[0][1] = $sFile
-           If $__bDebug == True Then _ArrayDisplay($aTmp, "$aTmp", $__sDebugTimeOut)
-           _ArrayAdd($aURI, $aTmp)
-           If $__bDebug == True Then _ArrayDisplay($aURI, "$aURI", $__sDebugTimeOut)
+        ; read each line from a file
+        $sLineRead = FileReadLine($hFileOpen)
+        ; exit the loop if end of file
+        If @error Then ExitLoop
+        ; show the line read (just for testing)
+        If $__bDebug == True Then ConsoleWrite($sLineRead & @CRLF)
+        If StringRegExp($sLineRead, $sMatchString) Then
+            If $__bDebug == True Then ConsoleWrite($sLineRead & @CRLF)
+            $aArray = StringRegExp($sLineRead, $sMatchString, 3)
+            If $__bDebug == True Then _ArrayDisplay($aArray, "$aArray")
+            For $i = 0 To UBound($aArray) - 1
+                If $__bDebug == True Then ConsoleWrite("RegExp Test with Option 3 - " & $aArray[$i] & @CRLF)
+            Next
+            $sDomain = $aArray[0]
+            $sVersion = $aArray[3]
+            $sSecretPath = $aArray[4]
+            $sFilename = $aArray[6]
+            $sProcessURL = "https://" & $sDomain & "/" & "otn-pub/java/jdk" & "/" & $sVersion & "/" & $sSecretPath & "/" & $sFilename
+            ConsoleWrite("$sProcessURL = " & $sProcessURL & @CRLF)
+            $sFile = $sFolder & "\" & $sFilename
+            ConsoleWrite("$sFile = " & $sFile & @CRLF)
+            Local $sJAVAHTML = $sFile & ".html"
+            ConsoleWrite("$sJAVAHTML = " & $sJAVAHTML & @CRLF)
+            WinHttpDownloadWithCookie($sJavaMain, $sJavaCookie, $sProcessURL, $sJAVAHTML)
+            $sURI = StringReplace(GetAllHREFfromHTML($sJAVAHTML), "&#43;", "+")
+            ConsoleWrite("$sURI = " & $sURI & @CRLF)
+            Local $aTmp[1][2]
+            $aTmp[0][0] = $sURI
+            $aTmp[0][1] = $sFile
+            If $__bDebug == True Then _ArrayDisplay($aTmp, "$aTmp")
+            _ArrayAdd($aURI, $aTmp)
+            If $__bDebug == True Then _ArrayDisplay($aURI, "$aURI")
 
-           ; Download real file here
-           If ($bDownload) and (Not InetFileSizeCompare($sURI, $sFile) or $bReplace) Then $sFunc($sURI, $sFile, $bReplace, $bProgress)
+            ; Download real file here
+            If ($bDownload) and (Not InetFileSizeCompare($sURI, $sFile) or $bReplace) Then
+                Local $sResult = $sFunc($sURI, $sFile, $bReplace, $bProgress)
+                If @error Then ; Try Methond 2, start from 8u261
+                    $sMinorVersion = StringTrimLeft($sVersion, 2)
+                    If StringInStr($sFilename, "windows") Then
+                        $sPlatform = "windows-i586"
+                    ElseIf StringInStr($sFilename, "osx") Then
+                        $sPlatform = "unix-i586"
+                    Else
+                        $sPlatform = "linux-i586"
+                    EndIf
 
-           ; Delete the data file.
+                    $sURI = StringFormat("https://javadl.oracle.com/webapps/download/GetFile/%s_%s/%s/%s/%s", $sMajorVersion, $sMinorVersion, $sSecretPath, $sPlatform, $sFilename)
+                    ConsoleWrite("$sURI = " & $sURI & @CRLF)
+                    If (Not InetFileSizeCompare($sURI, $sFile) or $bReplace) Then
+                        $sFunc($sURI, $sFile, $bReplace, $bProgress)
+                    EndIf
+                EndIf
+            EndIf
+
+           ; Delete the target JAVA html for each distribution.
            FileDelete($sJAVAHTML)
-       EndIf
+        EndIf
     WEnd
 
-    ; Close the handle returned by FileOpen.
+    ; Close the handle of JAVA main html returned by FileOpen.
     FileClose($hFileOpen)
 
-    ; Delete the file.
+    ; Delete the main JAVA html file.
     FileDelete($sFilePath)
 
     Return $aURI
@@ -438,13 +473,14 @@ Func BytesReceived($iReceivedBytes = 0, $iTotalReceivedBytes = 0, $iDownloadSize
 
 
 Func _GetJavaJREJDKDownloadPage($sJavaDownloadPage)
+    Local $sMathString = "javase-(server-)?(jre|jdk|amc)[0-9]?[1-9]?-downloads.html$"
     Local $sHTML = _INetGetSource($sJavaDownloadPage)
     If $__bDebug == True Then ConsoleWrite($sHTML & @CRLF)
     Local $aURIAll = _StringBetween($sHTML, "href='", "'>", $STR_ENDNOTSTART)
     $aURIAll = _ArrayUnique($aURIAll)
     If $__bDebug == True Then _ArrayDisplay($aURIAll, "All href link", $__sDebugTimeOut)
 
-    Local $aURIindex = _ArrayFindAll($aURIAll, "javase-(jre|jdk)[0-9][1-9]?-downloads.html", Default, Default, Default, 3, Default, Default)
+    Local $aURIindex = _ArrayFindAll($aURIAll, $sMathString, Default, Default, Default, 3, Default, Default)
     If $__bDebug == True Then _ArrayDisplay($aURIindex, "All herf link index with 'download' string", $__sDebugTimeOut)
 
     Local $aURI[0]
