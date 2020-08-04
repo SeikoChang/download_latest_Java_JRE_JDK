@@ -169,6 +169,13 @@ Func WinHttpDownload($sSource, $sFilePath, $bReplace = False, $bProgress = False
         $iDownloadSize = $iDownloadSize[0]
         ConsoleWrite(StringFormat("$sContentRange = %u\n$iDownloadSize = %u\n", $sContentRange, $iDownloadSize))
         ConsoleWrite($sHeader & @CRLF & @CRLF)
+
+        If StringInStr($sHeader, "HTTP/1.1 404 Not Found") Then
+            ConsoleWrite("HTTP/1.1 404 Not Found!!!" & @CRLF)
+            $iErr = 8
+            Return SetError($iErr, 0, $sFilePath)
+        EndIf
+
         ; Create a File handle to Download File
         Local $hFileOpen = FileOpen($sFilePath, BitOR($FO_OVERWRITE, $FO_CREATEPATH, $FO_BINARY))
         ; Read
